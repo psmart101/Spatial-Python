@@ -102,7 +102,7 @@ def analytics(eventsPath, clients=None):
 
         for industry in set(client.industry for client in clients):
             userPaths[industry] = {}
-            for client in clients:
+            for client in filter(lambda x: x.industry == industry, clients):
                 subset = client.interactions
                 if subset.empty:
                     continue
@@ -128,6 +128,50 @@ def analytics(eventsPath, clients=None):
                         row.append(userPaths[industry][userPath])
                 csvWriter.writerow(row)
 
+    def outreachStatusByInteractions(events, metric="source_event"):
+        outreachStatuses = {}
+        allInteractions = events.reset_index()
+
+        for industry in list(set(client.industry for client in clients))+["All"]:
+            outreachStatuses[industry] = {}
+            for outreach in range(1, 6):
+                outreachStatuses[industry][outreach] = {}
+                # Generate a dataframe of client IDs that match the given outreach status
+                emails = pandas.DataFrame((client.id for client in
+                                           filter(lambda x: x.status == outreach and x.industry == industry, clients)),
+                                          columns=["email"])
+                if industry == "All":
+                    emails = pandas.DataFrame((client.id for client in
+                                               filter(lambda x: x.status == outreach, clients)), columns=["email"])
+
+                emails.set_index("email", inplace=True)
+                # Create sub-dataframe only including events for the given outreach status
+                joined = allInteractions.join(emails, on="email",how="inner")[metric]
+
+                if not joined.empty:
+                    outreachStatuses[industry][outreach] = joined.value_counts().to_dict()
+
+                # Ensure there is a value for every outreach status (set 0 if no value).
+                for x in allInteractions[metric].unique():
+                    if x not in outreachStatuses[industry][outreach].keys():
+                        outreachStatuses[industry][outreach][x] = 0
+
+        wb = xlsxwriter.Workbook("analysis/statusByInteractions.xlsx")
+        for industry in list(set(client.industry for client in clients))+["All"]:
+            ws = wb.add_worksheet(industry)
+            # ws.write(y,x)
+
+            # headers
+            for x, status in enumerate(outreachStatuses[industry]):
+                ws.write(0, x+1, status)
+            for y, event in enumerate(outreachStatuses[industry][1]):
+                ws.write(y+1, 0, event)
+
+            for x, status in enumerate(outreachStatuses[industry]):
+                for y, event in enumerate(outreachStatuses[industry][status]):
+                    ws.write(y+1, x+1, outreachStatuses[industry][status][event])
+
+        wb.close()
 
 
     def interactionsPerClient(events):
@@ -192,8 +236,10 @@ def analytics(eventsPath, clients=None):
 #    print "interactionsPerClient completed"
 #    interactionsByIndustry(events, "source_event")
 #    print "interactionsByIndustry completed"
-    serializeEventsByIndustry()
-    print "serializeEventsByIndustry completed"
+#    serializeEventsByIndustry()
+#    print "serializeEventsByIndustry completed"
+    outreachStatusByInteractions(events)
+    print "outreachStatusByInteractions completed"
 
 
 def main():
