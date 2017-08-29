@@ -188,7 +188,7 @@ def analytics(eventsPath, clients=None):
 
                 emails.set_index("email", inplace=True)
                 # Create sub-dataframe only including events for the given outreach status
-                joined = allInteractions.join(emails, on="email",how="inner")[metric]
+                joined = allInteractions.join(emails, on="email", how="inner")[metric]
 
                 if not joined.empty:
                     if average:
@@ -250,7 +250,7 @@ def analytics(eventsPath, clients=None):
                                                                       x.industry == industryID, clients))
             statuses[statusID]["Total"] = len(filter(lambda x: x.status >= statusID, clients))
 
-        with open("analysis/outreachStatusSummary.csv","w+") as csvFile:
+        with open("analysis/outreachStatusSummary.csv", "w+") as csvFile:
             csvWriter = csv.writer(csvFile, lineterminator="\n")
             industries = list(industries) + ["Total"]
             csvWriter.writerow([""]+industries)
