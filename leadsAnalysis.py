@@ -1,5 +1,3 @@
-
-from datetime import *
 import xlsxwriter
 import pandas
 import csv
@@ -11,6 +9,9 @@ import csv
 
 
 class clientRecord:
+    """ Class representing an individual client, with all client attributes and actions (events) performed by client.
+
+    """
     def __init__(self, id, name, company, city, industry, status):
         self.id = id
         self.name = name
@@ -21,6 +22,10 @@ class clientRecord:
         self.interactions = pandas.DataFrame()
 
     def selfDescribe(self, showInteractions=False):
+        """ Diagnostic self-description function for each client.
+        :param showInteractions: If True, include show a subset of the client's interactions.
+        :return:
+        """
         print self.id
         print "\t".join((self.name, self.company, self.city, self.industry))
         print self.status
@@ -43,6 +48,12 @@ def prepareEvents(eventsPath):
 
 
 def createClients(clientsPath, eventsPath):
+    """ Instantiate clientRecord objects, add to list. Prepare events Dataframes and add to Client objects.
+
+    :param clientsPath: Path to leads.csv.
+    :param eventsPath: Path to events.csv.
+    :return: allClients: A list of Client objects with Events dataframes attached.
+    """
     allClients = []
     with open(clientsPath, "rU") as csvFile:
         csvReader = csv.reader(csvFile)
@@ -61,9 +72,19 @@ def createClients(clientsPath, eventsPath):
 
 
 def analytics(eventsPath, clients=None):
+    """Main driver function for all analytics of lead and event data (from csv).
+
+    :param eventsPath: Path to events.csv.
+    :param clients: Path to clients.csv.
+    :return: None
+    """
     events = prepareEvents(eventsPath)
 
     def eventFrequencies(events, groupbyUU=True):
+        """ Find frequencies at which all events were performed and write to csv.
+        :param events: Pandas DataFrame containing events. Passed from prepareEvents().
+        :param groupbyUU: Group events by Unique User. If true, repeated actions by a user will not be counted.
+        """
         eventFreq = {}
         eventTypes = set(events['source_event'])
         for eventType in eventTypes:
@@ -77,9 +98,12 @@ def analytics(eventsPath, clients=None):
             csvWriter = csv.writer(csvFile, lineterminator="\n")
             for evt in eventFreq:
                 csvWriter.writerow((evt, eventFreq[evt]))
-        return eventFreq
 
     def serializeEvents(events):
+        """ Find all linear sequences of events performed by unique clients. Count the number of times that
+            clients performed events in the same order, and write to csv.
+        :param events: Pandas DataFrame containing events. Passed from prepareEvents().
+        """
         userPaths = {}
         allUsers = events.index.get_level_values("email").unique()
         for userid in allUsers:
@@ -96,7 +120,14 @@ def analytics(eventsPath, clients=None):
             for path in userPaths:
                 csvWriter.writerow((userPaths[path], path))
 
-    def serializeEventsByIndustry(allowRepeats=False):
+    def serializeEventsByIndustry(allowRepeats=False, percentage=False):
+        """ Find all linear sequences of events performed by  clients in each industry. Count the number of times that
+            clients in a given industry performed events in the same order, and write to csv.
+        :param allowRepeats: Ignore repeated events. Event sequence (A, B, B, C) will be recorded a (A, B, C) if true.
+        :param percentage: State the number of clients that followed a specific path as percentage of all clients
+        in an industry.
+        :return:
+        """
         userPaths = {}
         allPaths = set()
 
@@ -117,6 +148,11 @@ def analytics(eventsPath, clients=None):
                     userPaths[industry][userPath] += 1
                 else:
                     userPaths[industry][userPath] = 1
+        if percentage:
+            for industry in userPaths:
+                for userPath in userPaths[industry]:
+                    # Turn the gross number of clients that followed a speciifc path to a percentage of all clients.
+                    userPaths[industry][userPath] /= float(len(filter(lambda x: x.industry == industry, clients)))
 
         with open("analysis/serializedByIndustry.csv", "w+") as csvFile:
             csvWriter = csv.writer(csvFile, lineterminator="\n")
@@ -128,7 +164,13 @@ def analytics(eventsPath, clients=None):
                         row.append(userPaths[industry][userPath])
                 csvWriter.writerow(row)
 
-    def outreachStatusByInteractions(events, metric="source_event"):
+    def outreachStatusByInteractions(events, metric="source_event", average=False):
+        """ Record the (average) number of interactions of each type per client, and organize by action x outreach status
+            (1-5). Create xlsx workbook with one page per industry and one 'overall' page measuring all clients.
+        :param events: Pandas DataFrame containing events. Passed from prepareEvents().
+        :param metric: The event type to use. Valid: source_event, source, event.
+        :param average: Take an average of client interactions instead of the gross number per lead engagement status.
+        """
         outreachStatuses = {}
         allInteractions = events.reset_index()
 
@@ -149,7 +191,14 @@ def analytics(eventsPath, clients=None):
                 joined = allInteractions.join(emails, on="email",how="inner")[metric]
 
                 if not joined.empty:
-                    outreachStatuses[industry][outreach] = joined.value_counts().to_dict()
+                    if average:
+                        denominator = len(emails)
+                        joined = joined.value_counts().to_dict()
+                        for event in joined:
+                            joined[event] /= float(denominator)
+                        outreachStatuses[industry][outreach] = joined
+                    else:
+                        outreachStatuses[industry][outreach] = joined.value_counts().to_dict()
 
                 # Ensure there is a value for every outreach status (set 0 if no value).
                 for x in allInteractions[metric].unique():
@@ -173,8 +222,10 @@ def analytics(eventsPath, clients=None):
 
         wb.close()
 
-
     def interactionsPerClient(events):
+        """ Find number of interactions per unique client, organized by client ID.
+        :param events: Pandas DataFrame containing events. Passed from prepareEvents().
+        """
         clientInteractions = {}
         for client in clients:
             # subset = events[events["email"] == client.id]
@@ -187,6 +238,8 @@ def analytics(eventsPath, clients=None):
                 csvWriter.writerow((client.id, clientInteractions[client]))
 
     def outreachStatusSummary():
+        """ Count the number of clients at or above each outreach status (1-5) for each industry. Record to csv.
+        """
         statuses = {}
         industries = set(client.industry for client in clients)
         for statusID in range(1, 6):
@@ -204,7 +257,13 @@ def analytics(eventsPath, clients=None):
             for statusID in statuses:
                 csvWriter.writerow([statusID] + list(statuses[statusID][industry] for industry in industries))
 
-    def interactionsByIndustry(events, metric="source_event"):
+    def interactionsByIndustry(events, metric="source", average=False):
+        """ Count total (average) number of client interactions with each part of the platform (# events) and organize
+            by industry.
+        :param events: Pandas DataFrame containing events. Passed from prepareEvents().
+        :param metric: The event type to use. Valid: source_event, source, event.
+        :param average: Take the average number of client interactions per industry, if true.
+        """
         eventsIndustries = {}
         eventTypes = set(events[metric])
 
@@ -219,6 +278,11 @@ def analytics(eventsPath, clients=None):
                 else:
                     eventsIndustries[event][client.industry] = numEvents
 
+        if average:
+            for event in eventsIndustries:
+                for industry in eventsIndustries[event]:
+                    eventsIndustries[event][industry] /= float(len(filter(lambda x: x.industry == industry, clients)))
+
         with open("analysis/interactionsByIndustry.csv", "w+") as csvFile:
             csvWriter = csv.writer(csvFile, lineterminator="\n")
             csvWriter.writerow([""]+list(eventType for eventType in eventsIndustries))
@@ -228,26 +292,30 @@ def analytics(eventsPath, clients=None):
                     row.append(eventsIndustries[event][industry])
                 csvWriter.writerow(row)
 
-#    eventFrequencies(events, False)
-#    print "eventFrequencies completed"
-#    serializeEvents(events)
-#    print "serializeEvents completed"
-#    interactionsPerClient(events)
-#    print "interactionsPerClient completed"
-#    interactionsByIndustry(events, "source_event")
-#    print "interactionsByIndustry completed"
-#    serializeEventsByIndustry()
-#    print "serializeEventsByIndustry completed"
-    outreachStatusByInteractions(events)
+    eventFrequencies(events, False)
+    print "eventFrequencies completed"
+    serializeEvents(events)
+    print "serializeEvents completed"
+    interactionsPerClient(events)
+    print "interactionsPerClient completed"
+    interactionsByIndustry(events, "source_event", average=False)
+    print "interactionsByIndustry completed"
+    serializeEventsByIndustry(percentage=True)
+    print "serializeEventsByIndustry completed"
+    outreachStatusByInteractions(events, average=True)
     print "outreachStatusByInteractions completed"
+    outreachStatusSummary()
+    print "outreachStatusSummary completed"
 
 
 def main():
+    """ Main driver function.
+
+    """
     eventsPath = "data\data\events.csv"
     leadsPath = "data\data\leads.csv"
 
     clients = createClients(leadsPath, eventsPath)
-    # analyzeClients(clients)
     analytics(eventsPath, clients)
 
 if __name__ == "__main__":
